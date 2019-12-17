@@ -1,0 +1,16 @@
+{
+  "name": "scrapper",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.3",
+    "fs-extra": "^8.1.0",
+    "got": "^10.0.4",
+    "jsdom": "^15.2.1"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-modules index.mjs"
+  }
+}
