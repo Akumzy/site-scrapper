@@ -1,78 +1,83 @@
-import got from "got";
-import jsdom from "jsdom";
-import fs from "fs-extra";
-import { fileURLToPath, parse as urlParse } from "url";
-import { dirname, join, parse } from "path";
-import { promisify } from "util";
-import stream from "stream";
-const pipeline = promisify(stream.pipeline);
+import got from 'got'
+import jsdom from 'jsdom'
+import fs from 'fs-extra'
+import { fileURLToPath, parse as urlParse } from 'url'
+import { dirname, join, parse } from 'path'
+import { promisify } from 'util'
+import stream from 'stream'
+import { URL } from 'url'
+const pipeline = promisify(stream.pipeline)
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+const dist = join(__dirname, 'download')
 const headers = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.120 Safari/537.36"
-};
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.120 Safari/537.36'
+}
+
 async function main() {
   try {
-    for (const origin of []) {
-      const name = getName(origin);
-      const dir = join(__dirname, "download", name);
-      await fs.ensureDir(dir);
-      await downloadPage(origin, dir, `${origin}/index.html`);
+    for (const origin of ['http://mehedi.asiandevelopers.com/demo/rinbuild/']) {
+      const name = getName(origin)
+      const dir = join(__dirname, 'download', name)
+      await fs.ensureDir(dir)
+      await downloadPage(origin, dir, origin)
     }
   } catch (error) {
-    console.log(error);
+    console.log(error)
   }
 }
 async function downloadPage(origin, dir, url) {
   try {
-    if (await fs.pathExists(join(dir, parse(url).base))) {
-      return;
+    let filename = parse(url).base
+    if (!(/(.html?)$/).test(filename)) {
+      filename = 'index.html'
     }
-    let body = (await got.get(url, { headers })).body;
-    await fs.writeFile(join(dir, parse(url).base), body);
-    const dom = new jsdom.JSDOM(body);
-    const $ = dom.window.document;
-    let css = [
-      ...new Set(
-        [...$.querySelectorAll("link")].map(el => el.getAttribute("href"))
-      )
-    ];
-    let js = [
-      ...new Set(
-        [...$.querySelectorAll("script")].map(el => el.getAttribute("src"))
-      )
-    ];
-    let images = [
-      ...new Set(
-        [...$.querySelectorAll("img")].map(el => el.getAttribute("src"))
-      )
-    ];
-    // console.log(images);
+    let filepath = join(dir, filename)
+    if (await fs.pathExists(filepath)) {
+      return
+    }
+    let body = (await got.get(url, { headers })).body
+    await fs.writeFile(filepath, body)
+    const dom = new jsdom.JSDOM(body)
+    const $ = dom.window.document
+    let css = [...new Set([...$.querySelectorAll('link')].map(el => el.getAttribute('href')))]
+    let js = [...new Set([...$.querySelectorAll('script')].map(el => el.getAttribute('src')))]
+    let images = [...new Set([...$.querySelectorAll('img')].map(el => el.getAttribute('src')))]
+   
     let links = [
       ...new Set(
-        [...$.querySelectorAll("a")]
-          .map(el => el.getAttribute("href"))
-          .filter(h => !["#", "/"].includes(h))
+        [...$.querySelectorAll('a')]
+          .map(el => el.getAttribute('href'))
+          .filter(h => {
+            if (h.startsWith('#')) {
+              return false
+            } else if (/^(tel:|mailto:|\/\/)/.test(h)) {
+              return false
+            } else if (/^https?:/.test(h) && !h.startsWith(origin)) {
+              return false
+            }
+            return true
+          })
       )
-    ];
-    await downloadAssets(origin, dir, js);
-    await downloadAssets(origin, dir, images, true);
-    await downloadAssets(origin, dir, css);
-    let cssLinks = parseCSS(body, url);
-    console.log({ cssLinks });
-    await downloadAssets(origin, dir, cssLinks);
+    ]
+    // return
+    await downloadAssets(origin, dir, css)
+    await downloadAssets(origin, dir, js)
+    await downloadAssets(origin, dir, images, true)
+    let cssLinks = parseCSS(body, url)
+    await downloadAssets(origin, dir, cssLinks)
     for (const link of links) {
       if (/(^http(s)?:\/\/|^\/\/)/.test(link)) {
-        continue;
+        continue
       }
 
-      console.log(`Scrapping ${link}`);
-      await downloadPage(origin, dir, `${origin}/${link}`);
+      console.log(`Scrapping ${link}`)
+      await downloadPage(origin, dir, `${origin}/${link}`)
     }
   } catch (error) {
-    console.log(error);
+    console.log(error)
   }
 }
 /**
@@ -82,41 +87,35 @@ async function downloadPage(origin, dir, url) {
 async function downloadAssets(origin, dir, links, image = false) {
   for (let link of links) {
     try {
-      let url = link;
-      let p = link;
+      let url = link
+      let local_path 
       if (/(^https?:\/\/|^\/\/)/.test(link) && !link.startsWith(origin)) {
-        continue;
+        continue
       }
-      if (link.startsWith(origin)) {
-        p = urlParse(link).pathname;
-      } else {
-        url = `${origin}/${link}`;
+      if (!link.startsWith(origin)) {
+        url = `${origin}/${link}`
       }
-      p = join(dir, p);
+      local_path = join(dist, urlParse(url).pathname)
 
-      if (await fs.pathExists(p)) {
-        console.log(`${p} exists`);
-        continue;
+      if (await fs.pathExists(local_path)) {
+        console.log(`${local_path} exists`)
+        continue
       }
-      await fs.ensureDir(parse(p).dir);
-      console.log(url);
-      console.log(p);
-      if (image || ![".css", ".html", ".js"].some(l => link.endsWith(l))) {
-        await pipeline(
-          got.stream.get(url, { headers }),
-          fs.createWriteStream(p)
-        );
+      await fs.ensureDir(parse(local_path).dir)
+     
+      if (image || !['.css', '.html', '.js'].some(l => link.endsWith(l))) {
+        await pipeline(got.stream.get(url, { headers }), fs.createWriteStream(local_path))
       } else {
-        let body = (await got(url, { headers })).body;
-        if (link.endsWith(".css")) {
-          let cssLinks = parseCSS(body, url);
-          console.log(cssLinks);
-          await downloadAssets(origin, dir, cssLinks);
+        let body = (await got(url, { headers })).body
+        await fs.writeFile(local_path, body)
+
+        if (link.endsWith('.css')) {
+          let cssLinks = parseCSS(body, url)
+          await downloadAssets(origin, dir, cssLinks)
         }
-        await fs.writeFile(p, body);
       }
     } catch (error) {
-      console.log(error);
+      console.log(error)
     }
   }
 }
@@ -125,30 +124,26 @@ async function downloadAssets(origin, dir, links, image = false) {
  * @param {string} link
  */
 function getName(link) {
-  let l = link.split("/");
-  if (l[l.length - 1].includes(".")) {
-    return l[l.length - 1].replace(".", "_");
-  }
-  return l[l.length - 1];
+  let url = new URL(link)
+  return url.pathname
 }
 /**
  *
  * @param {string} css
  */
 function parseCSS(css, origin) {
-  let f = css.match(
-    /url\((?!['"]?(?:data:|https?:|\/\/))(['"]?)([^'")]*)\1\)/g
-  );
+  let f = css.match(/url\((?!['"]?(?:data:|https?:|\/\/))(['"]?)([^'")]*)\1\)/g)
   if (f && f.length) {
     return f.map(c => {
-      for (const i of ["url", "'", '"', "(", ")", "`"]) {
-        c = c.split(i).join("");
+      for (const i of ['url', "'", '"', '(', ')', '`']) {
+        c = c.split(i).join('')
       }
-      c = join(parse(origin).dir, c).replace(":/", "://");
-      let p = urlParse(c);
-      return `${p.protocol}//${p.hostname}${p.pathname}`;
-    });
+      c = join(parse(origin).dir, c).replace(':/', '://')
+      let p = urlParse(c)
+      return `${p.protocol}//${p.hostname}${p.pathname}`
+    })
   }
-  return [];
+  return []
 }
-main();
+
+main()
